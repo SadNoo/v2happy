@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 import subprocess
+import time
 from typing import Any, Optional, Sequence, TYPE_CHECKING
 
 from .models import User, V2RayEndpoint
@@ -97,9 +98,30 @@ def run_stats_query(config: XrayConfig, pattern: str = "user>>>") -> dict[str, i
     else:
         command = default_stats_command(config.binary, config.api_address, pattern)
 
-    logger.debug("running xray stats command: %s", " ".join(command))
-    completed = subprocess.run(command, check=True, capture_output=True, text=True)
-    return parse_stats_output(completed.stdout)
+    last_error: Optional[subprocess.CalledProcessError] = None
+    for attempt in range(1, 6):
+        logger.debug("running xray stats command: %s", " ".join(command))
+        completed = subprocess.run(command, capture_output=True, text=True)
+        if completed.returncode == 0:
+            return parse_stats_output(completed.stdout)
+
+        last_error = subprocess.CalledProcessError(
+            completed.returncode,
+            command,
+            output=completed.stdout,
+            stderr=completed.stderr,
+        )
+        logger.warning(
+            "xray stats command failed attempt %s/5 exit=%s stdout=%r stderr=%r",
+            attempt,
+            completed.returncode,
+            completed.stdout.strip(),
+            completed.stderr.strip(),
+        )
+        time.sleep(attempt)
+
+    assert last_error is not None
+    raise last_error
 
 
 def parse_stats_output(output: str) -> dict[str, int]:
