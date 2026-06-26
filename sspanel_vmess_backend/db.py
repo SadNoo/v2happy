@@ -210,7 +210,7 @@ class Database:
                 cursor.execute(
                     """
                     INSERT INTO ss_node_info
-                      (node_id, uptime, load, log_time)
+                      (node_id, uptime, `load`, log_time)
                     VALUES
                       (%s, %s, %s, UNIX_TIMESTAMP())
                     """,
