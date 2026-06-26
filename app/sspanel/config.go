@@ -68,6 +68,10 @@ type Config struct {
 	AliSecret          string       `protobuf:"bytes,16,opt,name=ali_secret,json=aliSecret,proto3" json:"ali_secret,omitempty"`
 	CacheDurationSec   uint32       `protobuf:"varint,17,opt,name=cache_duration_sec,json=cacheDurationSec,proto3" json:"cache_duration_sec,omitempty"`
 	HTMLPath           string       `protobuf:"bytes,18,opt,name=html_path,json=htmlPath,proto3" json:"html_path,omitempty"`
+	TrafficReportSec   uint32       `protobuf:"varint,19,opt,name=traffic_report_sec,json=trafficReportSec,proto3" json:"traffic_report_sec,omitempty"`
+	AliveIPReportSec   uint32       `protobuf:"varint,20,opt,name=alive_ip_report_sec,json=aliveIpReportSec,proto3" json:"alive_ip_report_sec,omitempty"`
+	NodeReportSec      uint32       `protobuf:"varint,21,opt,name=node_report_sec,json=nodeReportSec,proto3" json:"node_report_sec,omitempty"`
+	OnlineReportSec    uint32       `protobuf:"varint,22,opt,name=online_report_sec,json=onlineReportSec,proto3" json:"online_report_sec,omitempty"`
 }
 
 func (c *Config) Reset()         { *c = Config{} }
@@ -100,6 +104,34 @@ func (c *Config) GetUseMySQL() uint32 {
 		return c.UseMySQL
 	}
 	return 0
+}
+
+func (c *Config) GetTrafficReportInterval() uint32 {
+	if c != nil && c.TrafficReportSec > 0 {
+		return c.TrafficReportSec
+	}
+	return c.GetCheckRate()
+}
+
+func (c *Config) GetAliveIPReportInterval() uint32 {
+	if c != nil && c.AliveIPReportSec > 0 {
+		return c.AliveIPReportSec
+	}
+	return c.GetCheckRate()
+}
+
+func (c *Config) GetNodeReportInterval() uint32 {
+	if c != nil && c.NodeReportSec > 0 {
+		return c.NodeReportSec
+	}
+	return c.GetCheckRate()
+}
+
+func (c *Config) GetOnlineReportInterval() uint32 {
+	if c != nil && c.OnlineReportSec > 0 {
+		return c.OnlineReportSec
+	}
+	return c.GetCheckRate()
 }
 
 func init() {

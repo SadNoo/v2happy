@@ -29,6 +29,10 @@ type SSPanelConfig struct {
 	AliSecret          string              `json:"ali_secret"`
 	CacheDurationSec   uint32              `json:"cache_duration_sec"`
 	HTMLPath           string              `json:"html_path"`
+	TrafficReportSec   uint32              `json:"trafficReportSec"`
+	AliveIPReportSec   uint32              `json:"aliveIpReportSec"`
+	NodeReportSec      uint32              `json:"nodeReportSec"`
+	OnlineReportSec    uint32              `json:"onlineReportSec"`
 }
 
 func (c *SSPanelConfig) Build() (*appsspanel.Config, error) {
@@ -50,6 +54,10 @@ func (c *SSPanelConfig) Build() (*appsspanel.Config, error) {
 		AliSecret:          c.AliSecret,
 		CacheDurationSec:   c.CacheDurationSec,
 		HTMLPath:           c.HTMLPath,
+		TrafficReportSec:   c.TrafficReportSec,
+		AliveIPReportSec:   c.AliveIPReportSec,
+		NodeReportSec:      c.NodeReportSec,
+		OnlineReportSec:    c.OnlineReportSec,
 	}
 	if c.MySQL != nil {
 		config.MySQL = &appsspanel.MySQLConfig{

@@ -35,6 +35,7 @@ import (
 )
 
 const mainInboundTag = "sspanel-vmess-main"
+const reportBatchSize = 200
 
 type App struct {
 	ctx            context.Context
@@ -52,7 +53,11 @@ type App struct {
 	disconnected map[int]map[string]struct{}
 	lastTraffic  map[int]trafficPair
 
-	inboundSignature string
+	inboundSignature  string
+	lastTrafficReport time.Time
+	lastAliveIPReport time.Time
+	lastNodeReport    time.Time
+	lastOnlineReport  time.Time
 }
 
 type panelNode struct {
@@ -85,6 +90,20 @@ type vmessNodeSettings struct {
 type trafficPair struct {
 	Uplink   int64
 	Downlink int64
+}
+
+type trafficDelta struct {
+	UserID int
+	U      int64
+	D      int64
+	RatedU int64
+	RatedD int64
+	Rate   float64
+}
+
+type aliveIPRecord struct {
+	UserID int
+	IP     string
 }
 
 func New(ctx context.Context, config *Config) (*App, error) {
@@ -206,6 +225,7 @@ func (a *App) loop() {
 }
 
 func (a *App) syncOnce() error {
+	now := time.Now()
 	node, err := a.loadNode()
 	if err != nil {
 		return err
@@ -218,23 +238,45 @@ func (a *App) syncOnce() error {
 	if err != nil {
 		return err
 	}
-	alive := a.drainAliveIP()
-	onlineUsers := len(alive)
-	if err := a.collectTraffic(node, users, onlineUsers); err != nil {
-		logWarning("SSPanel WARNING: failed to upload traffic", err)
-	}
-	if err := a.uploadAliveIP(alive); err != nil {
-		logWarning("SSPanel WARNING: failed to upload alive ip", err)
-	}
-	if err := a.uploadNodeInfo(onlineUsers); err != nil {
-		logWarning("SSPanel WARNING: failed to upload node info", err)
-	}
 	inboundUpdated, err := a.ensureInbound(settings, users)
 	if err != nil {
 		return err
 	}
 	a.storeUsers(users)
-	logInfo("SSPanel INFO: sync completed, allowed_users=", len(users), " online_users=", onlineUsers, " inbound_updated=", inboundUpdated)
+
+	onlineUsers := a.aliveUserCount()
+	trafficReported := false
+	aliveReported := false
+	nodeReported := false
+	onlineReported := false
+
+	if shouldRunReport(&a.lastTrafficReport, a.config.GetTrafficReportInterval(), now) {
+		trafficReported = true
+		if err := a.collectTraffic(node, users); err != nil {
+			logWarning("SSPanel WARNING: failed to upload traffic", err)
+		}
+	}
+	if shouldRunReport(&a.lastOnlineReport, a.config.GetOnlineReportInterval(), now) {
+		onlineReported = true
+		if err := a.uploadOnlineLog(node.ID, onlineUsers); err != nil {
+			logWarning("SSPanel WARNING: failed to upload online log", err)
+		}
+	}
+	if shouldRunReport(&a.lastNodeReport, a.config.GetNodeReportInterval(), now) {
+		nodeReported = true
+		if err := a.uploadNodeInfo(onlineUsers); err != nil {
+			logWarning("SSPanel WARNING: failed to upload node info", err)
+		}
+	}
+	if shouldRunReport(&a.lastAliveIPReport, a.config.GetAliveIPReportInterval(), now) {
+		aliveReported = true
+		alive := a.drainAliveIP()
+		if err := a.uploadAliveIP(alive); err != nil {
+			logWarning("SSPanel WARNING: failed to upload alive ip", err)
+		}
+	}
+
+	logInfo("SSPanel INFO: sync completed, allowed_users=", len(users), " online_users=", onlineUsers, " inbound_updated=", inboundUpdated, " traffic_reported=", trafficReported, " alive_reported=", aliveReported, " node_reported=", nodeReported, " online_reported=", onlineReported)
 	return nil
 }
 
@@ -361,14 +403,15 @@ func (a *App) replaceInbound(settings vmessNodeSettings, users []panelUser) erro
 	return nil
 }
 
-func (a *App) collectTraffic(node panelNode, users []panelUser, onlineUsers int) error {
+func (a *App) collectTraffic(node panelNode, users []panelUser) error {
 	if a.statsManager == nil {
 		return nil
 	}
 	now := time.Now().Unix()
 	totalU := int64(0)
 	totalD := int64(0)
-	updated := make(map[int]trafficPair)
+	updated := make(map[int]trafficPair, len(users))
+	deltas := make([]trafficDelta, 0, 128)
 
 	tx, err := a.db.Begin()
 	if err != nil {
@@ -395,26 +438,36 @@ func (a *App) collectTraffic(node panelNode, users []panelUser, onlineUsers int)
 		}
 		ratedU := int64(math.Round(float64(deltaU) * node.TrafficRate))
 		ratedD := int64(math.Round(float64(deltaD) * node.TrafficRate))
-		if _, err := tx.Exec("UPDATE `user` SET t = ?, u = u + ?, d = d + ? WHERE id = ?", now, ratedU, ratedD, user.ID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(
-			"INSERT INTO user_traffic_log (user_id, u, d, node_id, rate, traffic, log_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
-			user.ID, deltaU, deltaD, node.ID, node.TrafficRate, formatTraffic(float64(deltaU+deltaD)*node.TrafficRate), now,
-		); err != nil {
-			return err
-		}
+		deltas = append(deltas, trafficDelta{
+			UserID: user.ID,
+			U:      deltaU,
+			D:      deltaD,
+			RatedU: ratedU,
+			RatedD: ratedD,
+			Rate:   node.TrafficRate,
+		})
 		totalU += deltaU
 		totalD += deltaD
+	}
+
+	for start := 0; start < len(deltas); start += reportBatchSize {
+		end := start + reportBatchSize
+		if end > len(deltas) {
+			end = len(deltas)
+		}
+		chunk := deltas[start:end]
+		if err := updateUserTrafficBatch(tx, now, chunk); err != nil {
+			return err
+		}
+		if err := insertTrafficLogBatch(tx, node.ID, now, chunk); err != nil {
+			return err
+		}
 	}
 
 	if totalU+totalD > 0 {
 		if _, err := tx.Exec("UPDATE ss_node SET node_bandwidth = node_bandwidth + ?, node_heartbeat = ? WHERE id = ?", totalU+totalD, now, node.ID); err != nil {
 			return err
 		}
-	}
-	if _, err := tx.Exec("INSERT INTO ss_node_online_log (node_id, online_user, log_time) VALUES (?, ?, ?)", node.ID, onlineUsers, now); err != nil {
-		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return err
@@ -434,6 +487,13 @@ func (a *App) drainAliveIP() map[int]map[string]struct{} {
 	return alive
 }
 
+func (a *App) aliveUserCount() int {
+	a.access.RLock()
+	count := len(a.aliveIPs)
+	a.access.RUnlock()
+	return count
+}
+
 func (a *App) uploadAliveIP(alive map[int]map[string]struct{}) error {
 	if len(alive) == 0 {
 		return nil
@@ -444,14 +504,28 @@ func (a *App) uploadAliveIP(alive map[int]map[string]struct{}) error {
 		return err
 	}
 	defer tx.Rollback()
+	records := make([]aliveIPRecord, 0, len(alive))
 	for userID, ips := range alive {
 		for ip := range ips {
-			if _, err := tx.Exec("INSERT INTO alive_ip (nodeid, userid, ip, datetime) VALUES (?, ?, ?, ?)", a.config.GetNodeId(), userID, ip, now); err != nil {
-				return err
-			}
+			records = append(records, aliveIPRecord{UserID: userID, IP: ip})
+		}
+	}
+	for start := 0; start < len(records); start += reportBatchSize {
+		end := start + reportBatchSize
+		if end > len(records) {
+			end = len(records)
+		}
+		if err := insertAliveIPBatch(tx, int(a.config.GetNodeId()), now, records[start:end]); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()
+}
+
+func (a *App) uploadOnlineLog(nodeID int, onlineUsers int) error {
+	now := time.Now().Unix()
+	_, err := a.db.Exec("INSERT INTO ss_node_online_log (node_id, online_user, log_time) VALUES (?, ?, ?)", nodeID, onlineUsers, now)
+	return err
 }
 
 func (a *App) uploadNodeInfo(onlineUsers int) error {
@@ -596,6 +670,81 @@ func parseDecimalInt(value sql.NullString) (int, error) {
 		return 0, err
 	}
 	return int(math.Round(parsed)), nil
+}
+
+func updateUserTrafficBatch(tx *sql.Tx, now int64, deltas []trafficDelta) error {
+	if len(deltas) == 0 {
+		return nil
+	}
+	args := make([]interface{}, 0, 1+len(deltas)*5)
+	args = append(args, now)
+	var query strings.Builder
+	query.WriteString("UPDATE `user` SET t = ?, u = u + CASE id ")
+	for _, delta := range deltas {
+		query.WriteString("WHEN ? THEN ? ")
+		args = append(args, delta.UserID, delta.RatedU)
+	}
+	query.WriteString("ELSE 0 END, d = d + CASE id ")
+	for _, delta := range deltas {
+		query.WriteString("WHEN ? THEN ? ")
+		args = append(args, delta.UserID, delta.RatedD)
+	}
+	query.WriteString("ELSE 0 END WHERE id IN (")
+	for i, delta := range deltas {
+		if i > 0 {
+			query.WriteByte(',')
+		}
+		query.WriteByte('?')
+		args = append(args, delta.UserID)
+	}
+	query.WriteByte(')')
+	_, err := tx.Exec(query.String(), args...)
+	return err
+}
+
+func insertTrafficLogBatch(tx *sql.Tx, nodeID int, now int64, deltas []trafficDelta) error {
+	if len(deltas) == 0 {
+		return nil
+	}
+	args := make([]interface{}, 0, len(deltas)*7)
+	var query strings.Builder
+	query.WriteString("INSERT INTO user_traffic_log (user_id, u, d, node_id, rate, traffic, log_time) VALUES ")
+	for i, delta := range deltas {
+		if i > 0 {
+			query.WriteByte(',')
+		}
+		query.WriteString("(?, ?, ?, ?, ?, ?, ?)")
+		args = append(args, delta.UserID, delta.U, delta.D, nodeID, delta.Rate, formatTraffic(float64(delta.U+delta.D)*delta.Rate), now)
+	}
+	_, err := tx.Exec(query.String(), args...)
+	return err
+}
+
+func insertAliveIPBatch(tx *sql.Tx, nodeID int, now int64, records []aliveIPRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+	args := make([]interface{}, 0, len(records)*4)
+	var query strings.Builder
+	query.WriteString("INSERT INTO alive_ip (nodeid, userid, ip, datetime) VALUES ")
+	for i, record := range records {
+		if i > 0 {
+			query.WriteByte(',')
+		}
+		query.WriteString("(?, ?, ?, ?)")
+		args = append(args, nodeID, record.UserID, record.IP, now)
+	}
+	_, err := tx.Exec(query.String(), args...)
+	return err
+}
+
+func shouldRunReport(last *time.Time, intervalSeconds uint32, now time.Time) bool {
+	interval := time.Duration(intervalSeconds) * time.Second
+	if last.IsZero() || now.Sub(*last) >= interval {
+		*last = now
+		return true
+	}
+	return false
 }
 
 func formatTraffic(bytes float64) string {
