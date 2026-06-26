@@ -1,13 +1,12 @@
 module v2ray.com/core
 
-go 1.15
+go 1.23
 
 require (
-	github.com/dgryski/go-metro v0.0.0-20200812162917-85c65e2d0165 // indirect
 	github.com/go-sql-driver/mysql v1.5.0
 	github.com/golang/mock v1.4.4
-	github.com/golang/protobuf v1.4.3
-	github.com/google/go-cmp v0.5.2
+	github.com/golang/protobuf v1.5.0
+	github.com/google/go-cmp v0.7.0
 	github.com/gorilla/websocket v1.4.2
 	github.com/lucas-clemente/quic-go v0.18.1
 	github.com/miekg/dns v1.1.35
@@ -21,9 +20,21 @@ require (
 	golang.org/x/net v0.0.0-20201031054903-ff519b6c9102
 	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
 	golang.org/x/sys v0.0.0-20201106081118-db71ae66460a
+	google.golang.org/grpc v1.33.1
+	google.golang.org/protobuf v1.36.11
+	h12.io/socks v1.0.1
+)
+
+require (
+	github.com/cheekybits/genny v1.0.0 // indirect
+	github.com/davecgh/go-spew v1.1.1 // indirect
+	github.com/dgryski/go-metro v0.0.0-20200812162917-85c65e2d0165 // indirect
+	github.com/ebfe/bcrypt_pbkdf v0.0.0-20140212075826-3c8d2dcb253a // indirect
+	github.com/marten-seemann/qtls v0.10.0 // indirect
+	github.com/marten-seemann/qtls-go1-15 v0.1.0 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
+	golang.org/x/text v0.3.3 // indirect
 	golang.org/x/xerrors v0.0.0-20200804184101-5ec99f83aff1 // indirect
 	google.golang.org/genproto v0.0.0-20201105153401-9d023cd09d72 // indirect
-	google.golang.org/grpc v1.33.1
-	google.golang.org/protobuf v1.25.0
-	h12.io/socks v1.0.1
+	gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c // indirect
 )
