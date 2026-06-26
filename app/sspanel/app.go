@@ -8,6 +8,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"hash/fnv"
 	"io/ioutil"
 	"math"
 	"sort"
@@ -50,6 +51,8 @@ type App struct {
 	aliveIPs     map[int]map[string]struct{}
 	disconnected map[int]map[string]struct{}
 	lastTraffic  map[int]trafficPair
+
+	inboundSignature string
 }
 
 type panelNode struct {
@@ -110,22 +113,24 @@ func (*App) Type() interface{} {
 }
 
 func (a *App) Start() error {
-	newError("Plugin: New config").WriteToLog()
-	newError("Plugin: Using SSpanel").WriteToLog()
+	logInfo("SSPanel INFO: new config")
+	logInfo("SSPanel INFO: using SSpanel direct MySQL mode")
 	if a.config.GetUseMySQL() == 0 {
-		return newError("Plugin: only direct MySQL mode is implemented; set sspanel.usemysql to 1").AtError()
+		return newError("SSPanel ERROR: only direct MySQL mode is implemented; set sspanel.usemysql to 1").AtError()
 	}
 	db, err := sql.Open("mysql", a.mysqlDSN())
 	if err != nil {
 		return err
 	}
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(2)
+	db.SetConnMaxLifetime(5 * time.Minute)
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return err
 	}
 	a.db = db
-	newError("Plugin: Connecting database... Connected").WriteToLog()
-	newError("Plugin: Using Mysql Now").WriteToLog()
+	logInfo("SSPanel INFO: database connected")
 
 	sspanelruntime.SetHook(a)
 
@@ -192,7 +197,7 @@ func (a *App) loop() {
 		select {
 		case <-a.ticker.C:
 			if err := a.syncOnce(); err != nil {
-				newError("Plugin: sync failed").Base(err).AtWarning().WriteToLog()
+				logWarning("SSPanel WARNING: sync failed", err)
 			}
 		case <-a.done:
 			return
@@ -216,19 +221,20 @@ func (a *App) syncOnce() error {
 	alive := a.drainAliveIP()
 	onlineUsers := len(alive)
 	if err := a.collectTraffic(node, users, onlineUsers); err != nil {
-		newError("Plugin: failed to upload traffic").Base(err).AtWarning().WriteToLog()
+		logWarning("SSPanel WARNING: failed to upload traffic", err)
 	}
 	if err := a.uploadAliveIP(alive); err != nil {
-		newError("Plugin: failed to upload alive ip").Base(err).AtWarning().WriteToLog()
+		logWarning("SSPanel WARNING: failed to upload alive ip", err)
 	}
 	if err := a.uploadNodeInfo(onlineUsers); err != nil {
-		newError("Plugin: failed to upload node info").Base(err).AtWarning().WriteToLog()
+		logWarning("SSPanel WARNING: failed to upload node info", err)
 	}
-	if err := a.replaceInbound(settings, users); err != nil {
+	inboundUpdated, err := a.ensureInbound(settings, users)
+	if err != nil {
 		return err
 	}
 	a.storeUsers(users)
-	newError("Plugin: After Update, Current Users ", len(users), ", Online Users ", onlineUsers).WriteToLog()
+	logInfo("SSPanel INFO: sync completed, allowed_users=", len(users), " online_users=", onlineUsers, " inbound_updated=", inboundUpdated)
 	return nil
 }
 
@@ -245,10 +251,10 @@ WHERE id = ?`, a.config.GetNodeId())
 	}
 	node.NodeSpeedLimit, err = parseDecimalInt(nodeSpeedLimit)
 	if err != nil {
-		return node, newError("Plugin: invalid node_speedlimit").Base(err)
+		return node, newError("SSPanel ERROR: invalid node_speedlimit").Base(err).AtError()
 	}
 	if node.NodeBandwidthLimit != 0 && node.NodeBandwidth >= node.NodeBandwidthLimit {
-		return node, newError("Plugin: node bandwidth limit reached")
+		return node, newError("SSPanel ERROR: node bandwidth limit reached").AtError()
 	}
 	return node, nil
 }
@@ -277,7 +283,7 @@ func (a *App) loadUsers(node panelNode) ([]panelUser, error) {
 	}
 	defer rows.Close()
 
-	var users []panelUser
+	users := make([]panelUser, 0, 256)
 	for rows.Next() {
 		var user panelUser
 		if err := rows.Scan(&user.ID, &user.Email, &user.Passwd, &user.DisconnectIP); err != nil {
@@ -290,6 +296,18 @@ func (a *App) loadUsers(node panelNode) ([]panelUser, error) {
 	}
 	sort.Slice(users, func(i, j int) bool { return users[i].ID < users[j].ID })
 	return users, nil
+}
+
+func (a *App) ensureInbound(settings vmessNodeSettings, users []panelUser) (bool, error) {
+	signature := inboundFingerprint(settings, users)
+	if signature == a.inboundSignature {
+		return false, nil
+	}
+	if err := a.replaceInbound(settings, users); err != nil {
+		return false, err
+	}
+	a.inboundSignature = signature
+	return true, nil
 }
 
 func (a *App) replaceInbound(settings vmessNodeSettings, users []panelUser) error {
@@ -339,7 +357,7 @@ func (a *App) replaceInbound(settings vmessNodeSettings, users []panelUser) erro
 	if err := a.inboundManager.AddHandler(context.Background(), handler); err != nil {
 		return err
 	}
-	newError("Plugin: Successfully add MAIN INBOUND 0.0.0.0 port ", settings.Port).WriteToLog()
+	logInfo("SSPanel INFO: inbound rebuilt, listen=0.0.0.0:", settings.Port, " users=", len(users))
 	return nil
 }
 
@@ -448,7 +466,7 @@ func (a *App) uploadNodeInfo(onlineUsers int) error {
 }
 
 func (a *App) storeUsers(users []panelUser) {
-	userMap := make(map[int]panelUser)
+	userMap := make(map[int]panelUser, len(users))
 	disconnected := make(map[int]map[string]struct{})
 	for _, user := range users {
 		userMap[user.ID] = user
@@ -461,6 +479,12 @@ func (a *App) storeUsers(users []panelUser) {
 	a.users = userMap
 	a.disconnected = disconnected
 	a.access.Unlock()
+
+	for userID := range a.lastTraffic {
+		if _, ok := userMap[userID]; !ok {
+			delete(a.lastTraffic, userID)
+		}
+	}
 }
 
 func parseVMessNodeServer(server string) (vmessNodeSettings, error) {
@@ -506,9 +530,18 @@ func parseVMessNodeServer(server string) (vmessNodeSettings, error) {
 		}
 	}
 	if settings.Network != "tcp" {
-		return settings, newError("Plugin: only VMess TCP inbound is implemented in this build, got network=", settings.Network)
+		return settings, newError("SSPanel ERROR: only VMess TCP inbound is implemented in this build, got network=", settings.Network).AtError()
 	}
 	return settings, nil
+}
+
+func inboundFingerprint(settings vmessNodeSettings, users []panelUser) string {
+	hash := fnv.New64a()
+	_, _ = fmt.Fprintf(hash, "port=%d;alterID=%d;network=%s;", settings.Port, settings.AlterID, settings.Network)
+	for _, user := range users {
+		_, _ = fmt.Fprintf(hash, "%d:%s;", user.ID, user.Passwd)
+	}
+	return strconv.FormatUint(hash.Sum64(), 16)
 }
 
 func userEmail(userID int) string {
@@ -532,12 +565,18 @@ func counterValue(manager featureStats.Manager, name string) int64 {
 }
 
 func parseIPList(raw string) map[string]struct{} {
-	result := make(map[string]struct{})
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var result map[string]struct{}
 	for _, item := range strings.FieldsFunc(raw, func(r rune) bool {
 		return r == ',' || r == '\n' || r == '\r' || r == '\t' || r == ' '
 	}) {
 		item = strings.TrimSpace(item)
 		if item != "" {
+			if result == nil {
+				result = make(map[string]struct{})
+			}
 			result[item] = struct{}{}
 		}
 	}
@@ -599,6 +638,14 @@ func readUptime() float64 {
 		return 0
 	}
 	return uptime
+}
+
+func logInfo(values ...interface{}) {
+	newError(values...).AtInfo().WriteToLog()
+}
+
+func logWarning(message string, err error) {
+	newError(message).Base(err).AtWarning().WriteToLog()
 }
 
 func init() {
