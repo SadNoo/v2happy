@@ -1,16 +1,13 @@
 [Unit]
-Description=SSPanel-Uim VMess single-port backend
-After=network-online.target mariadb.service mysql.service xray.service
+Description=Generate SSPanel config for custom V2Ray 4.32.1 backend
+After=network-online.target mariadb.service mysql.service
 Wants=network-online.target
 
 [Service]
-Type=simple
-User=root
-Group=root
+Type=oneshot
 WorkingDirectory=/opt/sspanel-vmess-single-port-backend
 ExecStart=/opt/sspanel-vmess-single-port-backend/.venv/bin/sspanel-vmess-backend -c /etc/sspanel-vmess-backend/config.toml
-Restart=always
-RestartSec=5
+RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target

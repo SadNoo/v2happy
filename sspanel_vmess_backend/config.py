@@ -4,11 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Union
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9/3.10
-    import tomli as tomllib
-
 
 @dataclass(frozen=True)
 class DatabaseConfig:
@@ -17,47 +12,57 @@ class DatabaseConfig:
     user: str
     password: str
     database: str
-    charset: str = "utf8"
-    ssl_enable: bool = False
-    ssl_ca: str = ""
-    ssl_cert: str = ""
-    ssl_key: str = ""
 
 
 @dataclass(frozen=True)
 class NodeConfig:
     id: int
-    sync_interval_seconds: int = 60
-    protect_on_empty_users: bool = True
+    check_rate: int = 60
+    speedtest_check_rate: int = 0
 
 
 @dataclass(frozen=True)
-class XrayConfig:
-    binary: str
-    config_path: str
-    listen: str = "0.0.0.0"
-    api_address: str = "127.0.0.1:10085"
-    access_log_path: str = "/var/log/xray/access.log"
-    error_log_path: str = "/var/log/xray/error.log"
-    stats_cursor_path: str = "/var/lib/sspanel-vmess/stats.json"
-    access_cursor_path: str = "/var/lib/sspanel-vmess/access-log.json"
-    reload_command: Optional[list[str]] = None
-    stats_command: Optional[list[str]] = None
+class PanelConfig:
+    url: str = "https://google.com"
+    key: str = ""
+    type: int = 0
+    down_with_panel: int = 0
+    use_mysql: int = 1
+    mu_regex: str = "%5m%id.%suffix"
+    mu_suffix: str = "microsoft.com"
+
+
+@dataclass(frozen=True)
+class V2RayConfig:
+    config_path: str = "/etc/v2ray/config.json"
+    loglevel: str = "info"
     restart_command: Optional[list[str]] = None
+
+
+@dataclass(frozen=True)
+class PluginOptions:
+    cf_key: str = "bbbbbbbbbbbbbbbbbb"
+    cf_email: str = "v2ray@v2ray.com"
+    proxy_tcp: int = 0
+    ali_key: str = "sdfsdfsdfljlbjkljlkjsdfoiwje"
+    ali_secret: str = "jlsdflanljkljlfdsaklkjflsa"
+    cache_duration_sec: int = 60
+    html_path: str = ""
 
 
 @dataclass(frozen=True)
 class RuntimeConfig:
     dry_run: bool = False
-    run_once: bool = False
-    state_dir: str = "/var/lib/sspanel-vmess"
+    print_config: bool = False
 
 
 @dataclass(frozen=True)
 class AppConfig:
     database: DatabaseConfig
     node: NodeConfig
-    xray: XrayConfig
+    panel: PanelConfig
+    v2ray: V2RayConfig
+    plugin: PluginOptions
     runtime: RuntimeConfig
 
 
@@ -70,12 +75,19 @@ def _string_list(value: Optional[object]) -> Optional[list[str]]:
 
 
 def load_config(path: Union[str, Path]) -> AppConfig:
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.9/3.10
+        import tomli as tomllib
+
     config_path = Path(path)
     data = tomllib.loads(config_path.read_text(encoding="utf-8"))
 
     database = data.get("database", {})
     node = data.get("node", {})
-    xray = data.get("xray", {})
+    panel = data.get("panel", {})
+    v2ray = data.get("v2ray", {})
+    plugin = data.get("plugin", {})
     runtime = data.get("runtime", {})
 
     return AppConfig(
@@ -85,33 +97,37 @@ def load_config(path: Union[str, Path]) -> AppConfig:
             user=str(database["user"]),
             password=str(database["password"]),
             database=str(database["database"]),
-            charset=str(database.get("charset", "utf8")),
-            ssl_enable=bool(database.get("ssl_enable", False)),
-            ssl_ca=str(database.get("ssl_ca", "")),
-            ssl_cert=str(database.get("ssl_cert", "")),
-            ssl_key=str(database.get("ssl_key", "")),
         ),
         node=NodeConfig(
             id=int(node["id"]),
-            sync_interval_seconds=int(node.get("sync_interval_seconds", 60)),
-            protect_on_empty_users=bool(node.get("protect_on_empty_users", True)),
+            check_rate=int(node.get("check_rate", node.get("sync_interval_seconds", 60))),
+            speedtest_check_rate=int(node.get("speedtest_check_rate", 0)),
         ),
-        xray=XrayConfig(
-            binary=str(xray.get("binary", "xray")),
-            config_path=str(xray["config_path"]),
-            listen=str(xray.get("listen", "0.0.0.0")),
-            api_address=str(xray.get("api_address", "127.0.0.1:10085")),
-            access_log_path=str(xray.get("access_log_path", "/var/log/xray/access.log")),
-            error_log_path=str(xray.get("error_log_path", "/var/log/xray/error.log")),
-            stats_cursor_path=str(xray.get("stats_cursor_path", "/var/lib/sspanel-vmess/stats.json")),
-            access_cursor_path=str(xray.get("access_cursor_path", "/var/lib/sspanel-vmess/access-log.json")),
-            reload_command=_string_list(xray.get("reload_command")),
-            stats_command=_string_list(xray.get("stats_command")),
-            restart_command=_string_list(xray.get("restart_command")),
+        panel=PanelConfig(
+            url=str(panel.get("url", "https://google.com")),
+            key=str(panel.get("key", "")),
+            type=int(panel.get("type", 0)),
+            down_with_panel=int(panel.get("down_with_panel", 0)),
+            use_mysql=int(panel.get("use_mysql", 1)),
+            mu_regex=str(panel.get("mu_regex", "%5m%id.%suffix")),
+            mu_suffix=str(panel.get("mu_suffix", "microsoft.com")),
+        ),
+        v2ray=V2RayConfig(
+            config_path=str(v2ray.get("config_path", "/etc/v2ray/config.json")),
+            loglevel=str(v2ray.get("loglevel", "info")),
+            restart_command=_string_list(v2ray.get("restart_command")),
+        ),
+        plugin=PluginOptions(
+            cf_key=str(plugin.get("cf_key", "bbbbbbbbbbbbbbbbbb")),
+            cf_email=str(plugin.get("cf_email", "v2ray@v2ray.com")),
+            proxy_tcp=int(plugin.get("proxy_tcp", 0)),
+            ali_key=str(plugin.get("ali_key", "sdfsdfsdfljlbjkljlkjsdfoiwje")),
+            ali_secret=str(plugin.get("ali_secret", "jlsdflanljkljlfdsaklkjflsa")),
+            cache_duration_sec=int(plugin.get("cache_duration_sec", 60)),
+            html_path=str(plugin.get("html_path", "")),
         ),
         runtime=RuntimeConfig(
             dry_run=bool(runtime.get("dry_run", False)),
-            run_once=bool(runtime.get("run_once", False)),
-            state_dir=str(runtime.get("state_dir", "/var/lib/sspanel-vmess")),
+            print_config=bool(runtime.get("print_config", False)),
         ),
     )

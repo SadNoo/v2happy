@@ -5,11 +5,13 @@ import logging
 from pathlib import Path
 
 from .config import load_config
-from .service import BackendService
+from .plugin_config import build_v2ray_plugin_config, write_config
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="SSPanel-Uim VMess single-port backend")
+    parser = argparse.ArgumentParser(
+        description="Generate custom V2Ray 4.32.1 SSPanel plugin config"
+    )
     parser.add_argument(
         "-c",
         "--config",
@@ -29,9 +31,9 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    config_path = Path(args.config)
-    config = load_config(config_path)
-    BackendService(config).run()
+    config = load_config(Path(args.config))
+    payload = build_v2ray_plugin_config(config)
+    write_config(config, payload)
 
 
 if __name__ == "__main__":
