@@ -232,13 +232,18 @@ func (a *App) syncOnce() error {
 
 func (a *App) loadNode() (panelNode, error) {
 	var node panelNode
+	var nodeSpeedLimit sql.NullString
 	row := a.db.QueryRow(`
 SELECT id, server, node_group, node_class, node_speedlimit, traffic_rate, node_bandwidth, node_bandwidth_limit
 FROM ss_node
 WHERE id = ?`, a.config.GetNodeId())
-	err := row.Scan(&node.ID, &node.Server, &node.NodeGroup, &node.NodeClass, &node.NodeSpeedLimit, &node.TrafficRate, &node.NodeBandwidth, &node.NodeBandwidthLimit)
+	err := row.Scan(&node.ID, &node.Server, &node.NodeGroup, &node.NodeClass, &nodeSpeedLimit, &node.TrafficRate, &node.NodeBandwidth, &node.NodeBandwidthLimit)
 	if err != nil {
 		return node, err
+	}
+	node.NodeSpeedLimit, err = parseDecimalInt(nodeSpeedLimit)
+	if err != nil {
+		return node, newError("Plugin: invalid node_speedlimit").Base(err)
 	}
 	if node.NodeBandwidthLimit != 0 && node.NodeBandwidth >= node.NodeBandwidthLimit {
 		return node, newError("Plugin: node bandwidth limit reached")
@@ -532,6 +537,21 @@ func parseIPList(raw string) map[string]struct{} {
 		}
 	}
 	return result
+}
+
+func parseDecimalInt(value sql.NullString) (int, error) {
+	if !value.Valid {
+		return 0, nil
+	}
+	raw := strings.TrimSpace(value.String)
+	if raw == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, err
+	}
+	return int(math.Round(parsed)), nil
 }
 
 func formatTraffic(bytes float64) string {
