@@ -213,20 +213,22 @@ func (a *App) syncOnce() error {
 	if err != nil {
 		return err
 	}
-	if err := a.collectTraffic(node, users); err != nil {
+	alive := a.drainAliveIP()
+	onlineUsers := len(alive)
+	if err := a.collectTraffic(node, users, onlineUsers); err != nil {
 		newError("Plugin: failed to upload traffic").Base(err).AtWarning().WriteToLog()
 	}
-	if err := a.uploadAliveIP(); err != nil {
+	if err := a.uploadAliveIP(alive); err != nil {
 		newError("Plugin: failed to upload alive ip").Base(err).AtWarning().WriteToLog()
 	}
-	if err := a.uploadNodeInfo(len(users)); err != nil {
+	if err := a.uploadNodeInfo(onlineUsers); err != nil {
 		newError("Plugin: failed to upload node info").Base(err).AtWarning().WriteToLog()
 	}
 	if err := a.replaceInbound(settings, users); err != nil {
 		return err
 	}
 	a.storeUsers(users)
-	newError("Plugin: After Update, Current Users ", len(users)).WriteToLog()
+	newError("Plugin: After Update, Current Users ", len(users), ", Online Users ", onlineUsers).WriteToLog()
 	return nil
 }
 
@@ -341,7 +343,7 @@ func (a *App) replaceInbound(settings vmessNodeSettings, users []panelUser) erro
 	return nil
 }
 
-func (a *App) collectTraffic(node panelNode, users []panelUser) error {
+func (a *App) collectTraffic(node panelNode, users []panelUser, onlineUsers int) error {
 	if a.statsManager == nil {
 		return nil
 	}
@@ -393,7 +395,7 @@ func (a *App) collectTraffic(node panelNode, users []panelUser) error {
 			return err
 		}
 	}
-	if _, err := tx.Exec("INSERT INTO ss_node_online_log (node_id, online_user, log_time) VALUES (?, ?, ?)", node.ID, len(users), now); err != nil {
+	if _, err := tx.Exec("INSERT INTO ss_node_online_log (node_id, online_user, log_time) VALUES (?, ?, ?)", node.ID, onlineUsers, now); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -406,12 +408,15 @@ func (a *App) collectTraffic(node panelNode, users []panelUser) error {
 	return nil
 }
 
-func (a *App) uploadAliveIP() error {
+func (a *App) drainAliveIP() map[int]map[string]struct{} {
 	a.access.Lock()
 	alive := a.aliveIPs
 	a.aliveIPs = make(map[int]map[string]struct{})
 	a.access.Unlock()
+	return alive
+}
 
+func (a *App) uploadAliveIP(alive map[int]map[string]struct{}) error {
 	if len(alive) == 0 {
 		return nil
 	}
