@@ -1,0 +1,41 @@
+[database]
+host = "127.0.0.1"
+port = 3306
+user = "sspanel_node"
+password = "change-me"
+database = "sspanel"
+charset = "utf8"
+ssl_enable = false
+ssl_ca = ""
+ssl_cert = ""
+ssl_key = ""
+
+[node]
+id = 1
+sync_interval_seconds = 60
+protect_on_empty_users = true
+
+[xray]
+binary = "/usr/local/bin/xray"
+config_path = "/usr/local/etc/xray/config.json"
+listen = "0.0.0.0"
+api_address = "127.0.0.1:10085"
+access_log_path = "/var/log/xray/access.log"
+error_log_path = "/var/log/xray/error.log"
+stats_cursor_path = "/var/lib/sspanel-vmess/stats.json"
+access_cursor_path = "/var/lib/sspanel-vmess/access-log.json"
+
+# Debian systemd example. Adjust service name if your Xray unit differs.
+# If your Xray unit supports reload, you can use reload_command instead.
+# reload_command = ["systemctl", "reload", "xray"]
+restart_command = ["systemctl", "restart", "xray"]
+
+# Default when omitted is:
+# ["/usr/local/bin/xray", "api", "statsquery", "--server", "127.0.0.1:10085", "-pattern", "user>>>"]
+# Placeholders are supported: {binary}, {api_address}, {pattern}
+# stats_command = ["{binary}", "api", "statsquery", "--server", "{api_address}", "-pattern", "{pattern}"]
+
+[runtime]
+dry_run = false
+run_once = false
+state_dir = "/var/lib/sspanel-vmess"

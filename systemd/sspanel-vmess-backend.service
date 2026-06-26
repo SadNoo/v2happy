@@ -1,0 +1,16 @@
+[Unit]
+Description=SSPanel-Uim VMess single-port backend
+After=network-online.target mariadb.service mysql.service xray.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/sspanel-vmess-single-port-backend
+ExecStart=/opt/sspanel-vmess-single-port-backend/.venv/bin/sspanel-vmess-backend -c /etc/sspanel-vmess-backend/config.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
