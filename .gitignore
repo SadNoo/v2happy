@@ -1,7 +1,3 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.pycache/
-.venv/
-config.toml
+*.DS_Store
+bazel-*
+.idea
