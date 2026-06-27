@@ -72,6 +72,7 @@ type Config struct {
 	AliveIPReportSec   uint32       `protobuf:"varint,20,opt,name=alive_ip_report_sec,json=aliveIpReportSec,proto3" json:"alive_ip_report_sec,omitempty"`
 	NodeReportSec      uint32       `protobuf:"varint,21,opt,name=node_report_sec,json=nodeReportSec,proto3" json:"node_report_sec,omitempty"`
 	OnlineReportSec    uint32       `protobuf:"varint,22,opt,name=online_report_sec,json=onlineReportSec,proto3" json:"online_report_sec,omitempty"`
+	NodeIds            []uint32     `protobuf:"varint,23,rep,packed,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"`
 }
 
 func (c *Config) Reset()         { *c = Config{} }
@@ -83,6 +84,19 @@ func (c *Config) GetNodeId() uint32 {
 		return c.NodeId
 	}
 	return 0
+}
+
+func (c *Config) GetNodeIds() []uint32 {
+	if c == nil {
+		return nil
+	}
+	if len(c.NodeIds) > 0 {
+		return c.NodeIds
+	}
+	if c.NodeId > 0 {
+		return []uint32{c.NodeId}
+	}
+	return nil
 }
 
 func (c *Config) GetCheckRate() uint32 {
@@ -117,7 +131,7 @@ func (c *Config) GetAliveIPReportInterval() uint32 {
 	if c != nil && c.AliveIPReportSec > 0 {
 		return c.AliveIPReportSec
 	}
-	return c.GetCheckRate()
+	return 60
 }
 
 func (c *Config) GetNodeReportInterval() uint32 {

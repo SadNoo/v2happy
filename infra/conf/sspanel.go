@@ -12,6 +12,7 @@ type SSPanelMySQLConfig struct {
 
 type SSPanelConfig struct {
 	NodeId             uint32              `json:"nodeid"`
+	NodeIds            []uint32            `json:"nodeids"`
 	CheckRate          uint32              `json:"checkRate"`
 	SpeedTestCheckRate uint32              `json:"SpeedTestCheckRate"`
 	PanelUrl           string              `json:"panelUrl"`
@@ -38,6 +39,7 @@ type SSPanelConfig struct {
 func (c *SSPanelConfig) Build() (*appsspanel.Config, error) {
 	config := &appsspanel.Config{
 		NodeId:             c.NodeId,
+		NodeIds:            c.NodeIds,
 		CheckRate:          c.CheckRate,
 		SpeedTestCheckRate: c.SpeedTestCheckRate,
 		PanelUrl:           c.PanelUrl,
